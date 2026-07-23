@@ -255,7 +255,7 @@ export default function Calculator() {
                         value={it.label}
                         onChange={(e) => updateItem(pi, ii, { label: e.target.value })}
                         placeholder="항목"
-                        className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
+                        className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-400"
                       />
                       <input
                         inputMode="numeric"
@@ -265,7 +265,7 @@ export default function Calculator() {
                           updateItem(pi, ii, { amount: digits ? parseInt(digits, 10) : 0, needsCheck: false });
                         }}
                         placeholder="금액"
-                        className={`w-28 rounded-lg border px-3 py-2 text-right text-sm outline-none focus:border-indigo-400 ${
+                        className={`w-28 rounded-lg border px-3 py-2 text-right text-sm text-slate-800 outline-none focus:border-indigo-400 ${
                           it.needsCheck ? "border-rose-300 bg-rose-50" : "border-slate-200"
                         }`}
                       />
@@ -374,7 +374,7 @@ export default function Calculator() {
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="제목 (선택) 예: 7월 제주 여행"
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-indigo-400"
                 />
                 <button
                   onClick={save}
