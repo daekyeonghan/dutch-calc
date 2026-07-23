@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import {
   parseItems,
   calculateSettlement,
@@ -10,6 +11,8 @@ import {
   type RoundingMode,
   type SettlementResult,
 } from "@/lib/calc";
+import { getClientId } from "@/lib/clientId";
+import type { SettlementPayload } from "@/lib/settlement";
 
 type Step = "setup" | "input" | "review" | "result";
 
@@ -32,6 +35,9 @@ export default function Calculator() {
   const [people, setPeople] = useState<PersonEdit[]>([]);
   const [rounding, setRounding] = useState<RoundingOption>(DEFAULT_ROUNDING);
   const [result, setResult] = useState<SettlementResult | null>(null);
+  const [title, setTitle] = useState("");
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   const displayName = (raw: string, i: number) => raw.trim() || `사람${i + 1}`;
 
@@ -94,6 +100,8 @@ export default function Calculator() {
   function calculate() {
     const paid = people.map((p) => ({ name: p.name, paid: personTotal(p) }));
     setResult(calculateSettlement(paid, rounding));
+    setSaveState("idle");
+    setSavedId(null);
     setStep("result");
   }
 
@@ -101,10 +109,56 @@ export default function Calculator() {
     setStep("setup");
     setResult(null);
     setPeople([]);
+    setTitle("");
+    setSaveState("idle");
+    setSavedId(null);
+  }
+
+  // ---- save (기록) ----
+  async function save() {
+    if (!result) return;
+    const payload: SettlementPayload = {
+      people: result.people.map((pr, i) => ({
+        ...pr,
+        items: people[i].items.map((it) => ({ label: it.label, amount: it.amount })),
+      })),
+      transactions: result.transactions,
+      total: result.total,
+      perPerson: result.perPerson,
+      residual: result.residual,
+      residualName: result.residualName,
+      rounding: result.rounding,
+    };
+    setSaveState("saving");
+    try {
+      const res = await fetch("/api/settlements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Client-Id": getClientId() },
+        body: JSON.stringify({
+          title,
+          peopleCount: result.people.length,
+          total: result.total,
+          payload,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const { id } = await res.json();
+      setSavedId(id);
+      setSaveState("saved");
+    } catch {
+      setSaveState("idle");
+      alert("저장에 실패했어요. 잠시 후 다시 시도해주세요.");
+    }
   }
 
   return (
-    <div className="mx-auto w-full max-w-xl px-4 py-8">
+    <div className="relative mx-auto w-full max-w-xl px-4 py-8">
+      <Link
+        href="/history"
+        className="absolute right-4 top-4 rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-slate-500 ring-1 ring-slate-200 transition hover:bg-slate-50"
+      >
+        📋 기록
+      </Link>
       <header className="mb-6 text-center">
         <h1 className="text-2xl font-extrabold tracking-tight text-slate-800">
           🧮 더치페이 계산기
@@ -302,7 +356,38 @@ export default function Calculator() {
             ))}
           </div>
 
-          <div className="mt-6 flex gap-3">
+          {/* 저장 */}
+          <div className="mt-5 rounded-xl bg-slate-50 p-4">
+            {saveState === "saved" ? (
+              <div className="text-center">
+                <p className="font-semibold text-emerald-600">✅ 기록에 저장했어요</p>
+                <Link
+                  href={savedId ? `/history/${savedId}` : "/history"}
+                  className="mt-1 inline-block text-sm font-semibold text-indigo-600 hover:underline"
+                >
+                  저장된 기록 보기 →
+                </Link>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="제목 (선택) 예: 7월 제주 여행"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-indigo-400"
+                />
+                <button
+                  onClick={save}
+                  disabled={saveState === "saving"}
+                  className="shrink-0 rounded-lg bg-slate-800 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-900 disabled:opacity-50"
+                >
+                  {saveState === "saving" ? "저장 중…" : "기록 저장"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex gap-3">
             <GhostBtn onClick={() => setStep("review")}>내역 수정</GhostBtn>
             <PrimaryBtn onClick={reset}>처음부터</PrimaryBtn>
           </div>

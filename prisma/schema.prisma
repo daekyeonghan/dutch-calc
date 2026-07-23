@@ -1,0 +1,24 @@
+// Prisma 7 — 접속 URL은 prisma.config.ts(DATABASE_URL)에서 설정. 생성된 클라이언트는 lib/generated/prisma.
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 정산 기록 1건. 상세(사람별 항목/합계/송금결과 등)는 payload(JSON)에 통째로 저장.
+// 소유자 구분은 로그인 없이 브라우저 익명 ID(clientId). 나중에 로그인 붙이면 clientId → userId로 교체.
+model Settlement {
+  id          String   @id @default(cuid())
+  clientId    String   @map("client_id")
+  title       String?
+  peopleCount Int      @map("people_count")
+  total       Int
+  payload     Json
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([clientId, createdAt])
+  @@map("settlements")
+}
