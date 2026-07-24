@@ -32,6 +32,8 @@ interface KakaoSDK {
         title: string;
         description: string;
         imageUrl: string;
+        imageWidth?: number;
+        imageHeight?: number;
         link: KakaoShareLink;
       };
       buttons?: { title: string; link: KakaoShareLink }[];
@@ -206,10 +208,12 @@ export default function Calculator() {
       const origin = window.location.origin;
       const shareUrl = `${origin}/s/${id}`;
       const imageUrl = `${origin}/s/${id}/opengraph-image`;
+      // 대표 송금 1건 + "외 N건" — 인원이 많아도 한 줄로 깔끔하게. 상세는 링크(버튼)에서.
+      const tx = result.transactions;
       const headline =
-        result.transactions.length === 0
+        tx.length === 0
           ? "서로 주고받을 돈이 없어요!"
-          : result.transactions.map((t) => `${t.from} → ${t.to} ${won(t.amount)}`).join(", ");
+          : `${tx[0].from} → ${tx[0].to} ${won(tx[0].amount)}${tx.length > 1 ? ` 외 ${tx.length - 1}건` : ""}`;
 
       kakao.Share.sendDefault({
         objectType: "feed",
@@ -217,10 +221,12 @@ export default function Calculator() {
           title: "더치페이 계산 결과가 도착했어요.",
           description: headline,
           imageUrl,
+          imageWidth: 800, // 명시 안 하면 카카오가 비율을 몰라 이미지를 잘라버림
+          imageHeight: 400,
           link: { mobileWebUrl: shareUrl, webUrl: shareUrl },
         },
         buttons: [
-          { title: "결과 확인하기", link: { mobileWebUrl: shareUrl, webUrl: shareUrl } },
+          { title: "상세 결과 확인하기", link: { mobileWebUrl: shareUrl, webUrl: shareUrl } },
         ],
       });
     } catch {
