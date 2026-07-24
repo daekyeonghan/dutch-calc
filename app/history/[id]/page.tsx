@@ -83,13 +83,13 @@ export default function DetailPage() {
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-700">{p.name}</span>
                   <span className="text-sm text-slate-500">
-                    냄 {won(p.paid)} ·{" "}
+                    낸돈 {won(p.paid)} ·{" "}
                     {p.balance === 0 ? (
                       <span className="text-slate-400">정산 완료</span>
                     ) : p.balance > 0 ? (
-                      <span className="text-indigo-600">받을 {won(p.balance)}</span>
+                      <span className="text-indigo-600">받을 돈 {won(p.balance)}</span>
                     ) : (
-                      <span className="text-rose-500">줄 {won(-p.balance)}</span>
+                      <span className="text-rose-500">줄 돈 {won(-p.balance)}</span>
                     )}
                   </span>
                 </div>

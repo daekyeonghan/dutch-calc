@@ -17,6 +17,8 @@ export interface SettlementPayload {
   residual: number;
   residualName: string | null;
   rounding: RoundingOption;
+  // 정산 결과가 계산된 시점(ISO). 저장 시각(createdAt)과 별개로, 공유·이미지에 표시.
+  calculatedAt: string;
 }
 
 export interface SettlementListItem {

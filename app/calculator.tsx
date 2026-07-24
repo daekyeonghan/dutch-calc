@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import Script from "next/script";
 import {
   parseItems,
   calculateSettlement,
@@ -15,6 +16,28 @@ import { getClientId } from "@/lib/clientId";
 import type { SettlementPayload } from "@/lib/settlement";
 
 type Step = "setup" | "input" | "review" | "result";
+
+// 카카오 JS SDK에서 우리가 쓰는 부분만 최소 타입.
+interface KakaoShareLink {
+  mobileWebUrl: string;
+  webUrl: string;
+}
+interface KakaoSDK {
+  init(key: string): void;
+  isInitialized(): boolean;
+  Share: {
+    sendDefault(settings: {
+      objectType: "feed";
+      content: {
+        title: string;
+        description: string;
+        imageUrl: string;
+        link: KakaoShareLink;
+      };
+      buttons?: { title: string; link: KakaoShareLink }[];
+    }): void;
+  };
+}
 
 interface EditItem {
   label: string;
@@ -35,9 +58,11 @@ export default function Calculator() {
   const [people, setPeople] = useState<PersonEdit[]>([]);
   const [rounding, setRounding] = useState<RoundingOption>(DEFAULT_ROUNDING);
   const [result, setResult] = useState<SettlementResult | null>(null);
+  const [calculatedAt, setCalculatedAt] = useState<string>("");
   const [title, setTitle] = useState("");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   const displayName = (raw: string, i: number) => raw.trim() || `사람${i + 1}`;
 
@@ -100,6 +125,7 @@ export default function Calculator() {
   function calculate() {
     const paid = people.map((p) => ({ name: p.name, paid: personTotal(p) }));
     setResult(calculateSettlement(paid, rounding));
+    setCalculatedAt(new Date().toISOString()); // 결과가 나온 시점 캡처(공유·이미지에 표시)
     setSaveState("idle");
     setSavedId(null);
     setStep("result");
@@ -114,36 +140,49 @@ export default function Calculator() {
     setSavedId(null);
   }
 
-  // ---- save (기록) ----
-  async function save() {
-    if (!result) return;
-    const payload: SettlementPayload = {
-      people: result.people.map((pr, i) => ({
+  // 현재 결과를 저장 payload로 직렬화.
+  function buildPayload(res: SettlementResult): SettlementPayload {
+    return {
+      people: res.people.map((pr, i) => ({
         ...pr,
         items: people[i].items.map((it) => ({ label: it.label, amount: it.amount })),
       })),
-      transactions: result.transactions,
-      total: result.total,
-      perPerson: result.perPerson,
-      residual: result.residual,
-      residualName: result.residualName,
-      rounding: result.rounding,
+      transactions: res.transactions,
+      total: res.total,
+      perPerson: res.perPerson,
+      residual: res.residual,
+      residualName: res.residualName,
+      rounding: res.rounding,
+      calculatedAt: calculatedAt || new Date().toISOString(),
     };
+  }
+
+  // DB에 저장하고 id를 돌려준다(이미 저장돼 있으면 그 id 재사용). 저장·공유가 공유하는 로직.
+  async function persist(): Promise<string | null> {
+    if (!result) return null;
+    if (savedId) return savedId;
+    const res = await fetch("/api/settlements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Client-Id": getClientId() },
+      body: JSON.stringify({
+        title,
+        peopleCount: result.people.length,
+        total: result.total,
+        payload: buildPayload(result),
+      }),
+    });
+    if (!res.ok) throw new Error();
+    const { id } = await res.json();
+    setSavedId(id);
+    return id as string;
+  }
+
+  // ---- save (기록) ----
+  async function save() {
+    if (!result) return;
     setSaveState("saving");
     try {
-      const res = await fetch("/api/settlements", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Client-Id": getClientId() },
-        body: JSON.stringify({
-          title,
-          peopleCount: result.people.length,
-          total: result.total,
-          payload,
-        }),
-      });
-      if (!res.ok) throw new Error();
-      const { id } = await res.json();
-      setSavedId(id);
+      await persist();
       setSaveState("saved");
     } catch {
       setSaveState("idle");
@@ -151,8 +190,59 @@ export default function Calculator() {
     }
   }
 
+  // ---- 카카오톡 공유 ----
+  async function share() {
+    if (!result || sharing) return;
+    const kakao = (window as unknown as { Kakao?: KakaoSDK }).Kakao;
+    if (!kakao || !kakao.isInitialized()) {
+      alert("공유 기능을 불러오는 중이에요. 잠시 후 다시 시도해주세요.");
+      return;
+    }
+    setSharing(true);
+    try {
+      const id = await persist(); // 공유하려면 먼저 저장(=id 발급)돼 있어야 함
+      if (!id) throw new Error();
+      setSaveState("saved"); // 공유는 저장을 겸하므로 기록에도 남았음을 UI에 반영
+      const origin = window.location.origin;
+      const shareUrl = `${origin}/s/${id}`;
+      const imageUrl = `${origin}/s/${id}/opengraph-image`;
+      const headline =
+        result.transactions.length === 0
+          ? "서로 주고받을 돈이 없어요!"
+          : result.transactions.map((t) => `${t.from} → ${t.to} ${won(t.amount)}`).join(", ");
+
+      kakao.Share.sendDefault({
+        objectType: "feed",
+        content: {
+          title: "더치페이 계산 결과가 도착했어요.",
+          description: headline,
+          imageUrl,
+          link: { mobileWebUrl: shareUrl, webUrl: shareUrl },
+        },
+        buttons: [
+          { title: "결과 확인하기", link: { mobileWebUrl: shareUrl, webUrl: shareUrl } },
+        ],
+      });
+    } catch {
+      alert("공유에 실패했어요. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setSharing(false);
+    }
+  }
+
   return (
     <div className="relative mx-auto w-full max-w-xl px-4 py-8">
+      {/* 카카오 JS SDK — 로드되면 Kakao.init 호출. 키가 없으면 공유 버튼은 알아서 비활성. */}
+      <Script
+        src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js"
+        integrity="sha384-DKYJZ8NLiK8MN4/C5P2dtSmLQ4KwPaoqAfyA/DfmEc1VDxu4yyC7wy6K1Hs90nka"
+        crossOrigin="anonymous"
+        onLoad={() => {
+          const key = process.env.NEXT_PUBLIC_KAKAO_JS_KEY;
+          const kakao = (window as unknown as { Kakao?: KakaoSDK }).Kakao;
+          if (key && kakao && !kakao.isInitialized()) kakao.init(key);
+        }}
+      />
       <Link
         href="/history"
         className="absolute right-4 top-4 rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-slate-500 ring-1 ring-slate-200 transition hover:bg-slate-50"
@@ -343,20 +433,20 @@ export default function Calculator() {
               <div key={i} className="flex items-center justify-between px-4 py-2.5 text-sm">
                 <span className="font-semibold text-slate-700">{p.name}</span>
                 <span className="text-slate-500">
-                  냄 {won(p.paid)} ·{" "}
+                  낸돈 {won(p.paid)} ·{" "}
                   {p.balance === 0 ? (
                     <span className="text-slate-400">정산 완료</span>
                   ) : p.balance > 0 ? (
-                    <span className="text-indigo-600">받을 {won(p.balance)}</span>
+                    <span className="text-indigo-600">받을 돈 {won(p.balance)}</span>
                   ) : (
-                    <span className="text-rose-500">줄 {won(-p.balance)}</span>
+                    <span className="text-rose-500">줄 돈 {won(-p.balance)}</span>
                   )}
                 </span>
               </div>
             ))}
           </div>
 
-          {/* 저장 */}
+          {/* 저장 · 공유 */}
           <div className="mt-5 rounded-xl bg-slate-50 p-4">
             {saveState === "saved" ? (
               <div className="text-center">
@@ -367,6 +457,15 @@ export default function Calculator() {
                 >
                   저장된 기록 보기 →
                 </Link>
+                <div className="mt-3">
+                  <button
+                    onClick={share}
+                    disabled={sharing}
+                    className="inline-flex items-center gap-1 rounded-lg bg-[#FEE500] px-4 py-2 text-sm font-bold text-[#191600] transition hover:brightness-95 disabled:opacity-50"
+                  >
+                    {sharing ? "공유 중…" : "💬 카카오톡 공유"}
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="flex gap-2">
@@ -382,6 +481,13 @@ export default function Calculator() {
                   className="shrink-0 rounded-lg bg-slate-800 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-900 disabled:opacity-50"
                 >
                   {saveState === "saving" ? "저장 중…" : "기록 저장"}
+                </button>
+                <button
+                  onClick={share}
+                  disabled={sharing}
+                  className="flex shrink-0 items-center gap-1 rounded-lg bg-[#FEE500] px-4 py-2 text-sm font-bold text-[#191600] transition hover:brightness-95 disabled:opacity-50"
+                >
+                  {sharing ? "공유 중…" : "💬 공유"}
                 </button>
               </div>
             )}
